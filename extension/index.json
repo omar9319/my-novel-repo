@@ -10,7 +10,7 @@
     "dateFormatLocale": "",
     "isNsfw": false,
     "hasCloudflare": false,
-    "sourceCodeUrl": "https://github.com/omar9319/my-novel-repo/blob/main/extension/source.js",
+    "sourceCodeUrl": "https://raw.githubusercontent.com/omar9319/my-novel-repo/refs/heads/main/extension/source.js",
     "apiUrl": "",
     "version": "1.0.0",
     "isManga": false,
