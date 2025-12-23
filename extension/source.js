@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.13",
+  "version": "1.0.14",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -219,156 +219,155 @@ class DefaultExtension extends MProvider {
   }
 
     async cleanHtmlContent(html, fallbackTitle) {
-      const doc = new Document(html);
-  
-      const escapeHtml = (s) =>
-        String(s || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;");
-  
-      const decodeHtml = (s) =>
-        String(s || "")
-          .replace(/&nbsp;/gi, " ")
-          .replace(/&amp;/gi, "&")
-          .replace(/&lt;/gi, "<")
-          .replace(/&gt;/gi, ">")
-          .replace(/&quot;/gi, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&#039;/g, "'")
-          .replace(/&#(\d+);/g, (_, n) => {
-            try {
-              return String.fromCharCode(parseInt(n, 10));
-            } catch (_) {
-              return _;
-            }
-          });
-  
-      const title =
-        doc.selectFirst("li.active")?.text?.trim() ||
-        doc.selectFirst("div.post-title h1")?.text?.trim() ||
-        doc.selectFirst("h1")?.text?.trim() ||
-        fallbackTitle ||
-        "";
-  
-      const reading =
-        doc.selectFirst("div.reading-content") ||
-        doc.selectFirst("div.entry-content") ||
-        doc.selectFirst("article");
-  
-      if (!reading) {
-        return `<div style="white-space:pre-wrap;line-height:1.8">${escapeHtml(title)}</div>`;
-      }
-  
-      // Remove elements that commonly pollute the chapter page (ads, nav, chapter selectors, comments, etc.)
-      const removeSelectors = [
-        "script",
-        "style",
-        "iframe",
-        "ins",
-        "form",
-        "select",
-        "option",
-        "button",
-        "nav",
-        "header",
-        "footer",
-        "aside",
-        "ul",
-        "ol",
-        "li",
-        "table",
-        ".select-chapter",
-        ".chapter-select",
-        ".wp-manga-chapter",
-        ".wp-manga-nav",
-        ".manga-navigation",
-        ".nav-links",
-        ".post-navigation",
-        ".navigation",
-        ".comments-area",
-        "#comments",
-        ".comment-respond",
-        ".comment-form",
-        ".breadcrumbs",
-        ".sharedaddy",
-        ".addtoany_share_save_container",
-        ".adsbygoogle",
-        ".code-block",
-        ".entry-meta",
-        ".tags-links",
-        ".related-posts",
-        ".related",
-        ".recommended",
-        ".suggested",
-        ".donation",
-        ".memberships",
-      ];
-  
-      for (const sel of removeSelectors) {
-        for (const el of reading.select(sel)) {
+    const decodeEntities = (input) => {
+      if (!input) return "";
+      const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+      return String(input).replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, code) => {
+        if (code[0] === "#") {
+          const isHex = code[1] === "x" || code[1] === "X";
+          const num = parseInt(code.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+          return Number.isNaN(num) ? m : String.fromCodePoint(num);
+        }
+        return Object.prototype.hasOwnProperty.call(named, code) ? named[code] : m;
+      });
+    };
+
+    const escapeHtml = (input) =>
+      String(input ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const doc = new Document(html);
+
+    const title =
+      doc.selectFirst("li.active")?.text?.trim() ||
+      doc.selectFirst("div.post-title h1")?.text?.trim() ||
+      doc.selectFirst("h1")?.text?.trim() ||
+      fallbackTitle ||
+      "";
+
+    const reading =
+      doc.selectFirst("div.reading-content") ||
+      doc.selectFirst("div.entry-content") ||
+      doc.selectFirst("article") ||
+      doc.selectFirst("main") ||
+      doc.selectFirst("body");
+
+    const readingHtml = reading?.innerHtml || "";
+
+    // Parse the chapter HTML into its own Document to avoid calling .select() on Element
+    const contentDoc = new Document(`<div id="__wrap">${readingHtml}</div>`);
+
+    // Remove obvious non-content blocks if they exist in chapter body
+    const removeSelectors = [
+      "script",
+      "style",
+      "noscript",
+      "iframe",
+      "form",
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "nav",
+      "header",
+      "footer",
+      "aside",
+      "div.comments-area",
+      "div#comments",
+      "div.wpdiscuz",
+      "div#respond",
+      "div#reply-title",
+      "div.related",
+      "div.recommended",
+      "div.ad",
+      "ins.adsbygoogle",
+      "ul.page-numbers",
+      "a.next",
+      "a.prev",
+      "a.previous",
+    ];
+
+    for (const sel of removeSelectors) {
+      const els = contentDoc.select(sel) || [];
+      for (const el of els) {
+        try {
           el.remove();
-        }
+        } catch (_) {}
       }
-  
-      // Remove blocks by keywords (footer/ads text). This is intentionally conservative.
-      const junkHints = [
-        "عضوية مميزة",
-        "تخلص من الإعلانات",
-        "Patreon",
-        "Ko-fi",
-        "PayPal",
-        "فضاء روايات",
-        "روايات مقترحة",
-        "العلامات",
-        "التعليقات",
-        "لتفعيل العضوية",
-        "طرق الدفع",
-      ];
-  
-      for (const el of reading.select("div,section,p,blockquote")) {
-        const t = (el.text || "").trim();
-        if (!t) continue;
-        for (const hint of junkHints) {
-          if (t.includes(hint)) {
-            el.remove();
-            break;
-          }
-        }
-      }
-  
-      // Preserve spacing exactly as in the HTML by translating <p>/<br> into newlines WITHOUT collapsing them.
-      let contentHtml = reading.innerHtml || "";
-      contentHtml = contentHtml.replace(/\r\n?/g, "\n");
-  
-      let text = contentHtml;
-  
-      // Line breaks / paragraphs
-      text = text.replace(/<\s*br\s*\/?\s*>/gi, "\n");
-      text = text.replace(/<\/\s*p\s*>/gi, "\n\n");
-      text = text.replace(/<\s*p[^>]*>/gi, "");
-  
-      // Other block endings -> paragraph breaks
-      text = text.replace(/<\/\s*(div|section|article|blockquote|h1|h2|h3|h4|h5|h6)\s*>/gi, "\n\n");
-      text = text.replace(/<\s*(div|section|article|blockquote|h1|h2|h3|h4|h5|h6)[^>]*>/gi, "");
-  
-      // Strip anything else
-      text = text.replace(/<[^>]+>/g, "");
-  
-      // Decode entities AFTER stripping tags
-      text = decodeHtml(text);
-  
-      // Trim line-end spaces but keep empty lines (don't collapse multiple blank lines)
-      text = text
-        .split("\n")
-        .map((l) => l.replace(/[ \t]+$/g, ""))
-        .join("\n")
-        .trim();
-  
-      // Render as pre-wrapped plain text for stable spacing in Mangayomi.
-      return `<div style="white-space:pre-wrap;line-height:1.85">${escapeHtml(title)}\n\n${escapeHtml(text)}</div>`;
     }
+
+    const wrap = contentDoc.selectFirst("#__wrap");
+
+    // Convert HTML -> text while preserving line breaks (so empty lines remain)
+    let fragment = wrap?.innerHtml || "";
+    fragment = fragment
+      .replace(/<\s*script[\s\S]*?<\/\s*script\s*>/gi, "")
+      .replace(/<\s*style[\s\S]*?<\/\s*style\s*>/gi, "")
+      .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/\s*p\s*>/gi, "\n\n")
+      .replace(/<\/\s*div\s*>/gi, "\n\n")
+      .replace(/<\/\s*li\s*>/gi, "\n")
+      .replace(/<[^>]+>/g, "");
+
+    let rawText = decodeEntities(fragment).replace(/\r/g, "");
+
+    // Remove common site banners / membership notices that leak into chapter body
+    const junkNeedles = [
+      "عضوية مميزة",
+      "Patreon",
+      "Ko-fi",
+      "PayPal",
+      "Visa",
+      "للتواصل معنا",
+      "طرق الدفع",
+      "جميع ما تم ترجمته",
+      "هذا مجرد محتوى ترفيهي",
+      "استغفر الله",
+    ];
+
+    const lines = rawText.split("\n");
+    const out = [];
+    let blankRun = 0;
+
+    for (let line of lines) {
+      // normalize spaces inside the line, but keep blank lines
+      line = String(line ?? "").replace(/\s+/g, " ").trim();
+
+      if (!line) {
+        blankRun += 1;
+        // keep up to 3 consecutive blank lines
+        if (blankRun <= 3) out.push("");
+        continue;
+      }
+
+      blankRun = 0;
+
+      let isJunk = false;
+      for (const needle of junkNeedles) {
+        if (line.includes(needle)) {
+          isJunk = true;
+          break;
+        }
+      }
+      if (isJunk) continue;
+
+      out.push(line);
+    }
+
+    const text = out.join("\n").trim();
+    if (!text) {
+      // fallback: show whatever the page had, to avoid empty chapter
+      const fallback = (reading?.text || "").trim();
+      return `<h2>${escapeHtml(title)}</h2>\n<div>${escapeHtml(fallback)}</div>`;
+    }
+
+    const bodyHtml = escapeHtml(text).replace(/\n/g, "<br>\n");
+    return `<h2>${escapeHtml(title)}</h2>\n<div>${bodyHtml}</div>`;
+  }
 
 
   getFilterList() {
