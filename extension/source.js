@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -232,100 +232,88 @@ class DefaultExtension extends MProvider {
       doc.selectFirst("div.entry-content") ||
       doc.selectFirst("article");
 
+    let contentHtml = reading?.innerHtml || "";
+
+    // Remove obvious non-content blocks that sometimes appear inside reading-content.
+    contentHtml = contentHtml
+      .replace(/<\s*script[\s\S]*?<\/\s*script\s*>/gi, "")
+      .replace(/<\s*style[\s\S]*?<\/\s*style\s*>/gi, "")
+      .replace(/<\s*noscript[\s\S]*?<\/\s*noscript\s*>/gi, "")
+      .replace(/<\s*iframe[\s\S]*?<\/\s*iframe\s*>/gi, "")
+      .replace(/<\s*ins[\s\S]*?<\/\s*ins\s*>/gi, "");
+
+    // If the site injects extra sections after the chapter text, cut at the first marker.
+    const stopMarkers = [
+      "التعليقات",
+      "العلامات",
+      "روايات مقترحة",
+      "عضوية",
+      "Patreon",
+      "Ko-fi",
+    ];
+    const lower = contentHtml.toLowerCase();
+    let cutAt = -1;
+    for (const m of stopMarkers) {
+      const idx = lower.indexOf(String(m).toLowerCase());
+      if (idx !== -1) cutAt = cutAt === -1 ? idx : Math.min(cutAt, idx);
+    }
+    if (cutAt !== -1) contentHtml = contentHtml.slice(0, cutAt);
+
+    const htmlToTextPreserveBreaks = (s) => {
+      let t = String(s || "");
+
+      // Preserve the breaks that actually exist in the HTML.
+      t = t.replace(/<\s*br\s*\/?\s*>/gi, "\n");
+      t = t.replace(/<\s*\/\s*p\s*>/gi, "\n\n");
+      t = t.replace(/<\s*p[^>]*>/gi, "");
+
+      // Some sites use div wrappers as lines.
+      t = t.replace(/<\s*\/\s*div\s*>/gi, "\n");
+      t = t.replace(/<\s*div[^>]*>/gi, "");
+
+      // Remove any remaining tags.
+      t = t.replace(/<[^>]+>/g, "");
+
+      // Decode the most common HTML entities.
+      t = t
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+          const n = parseInt(hex, 16);
+          return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+        })
+        .replace(/&#([0-9]+);/g, (_, dec) => {
+          const n = parseInt(dec, 10);
+          return Number.isFinite(n) ? String.fromCodePoint(n) : _;
+        });
+
+      // Keep blank lines; only trim trailing spaces per line.
+      t = t.replace(/\r/g, "");
+      t = t
+        .split("\n")
+        .map((line) => line.replace(/[ \t]+$/g, ""))
+        .join("\n");
+      return t.trim();
+    };
+
+    const text = htmlToTextPreserveBreaks(contentHtml);
+
     const escapeHtml = (s) =>
       String(s || "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+        .replace(/"/g, "&quot;");
 
-    if (!reading) {
-      return `<h2>${escapeHtml(title)}</h2><p>(لم يتم العثور على محتوى الفصل في الصفحة)</p>`;
-    }
+    // pre-wrap ensures the actual blank lines are rendered in the reader.
+    const body = `<div style="direction: rtl; text-align: right; white-space: pre-wrap; line-height: 1.9;">${escapeHtml(text)}</div>`;
 
-    // Prefer real paragraph nodes to preserve spacing (HTML renderers ignore '\n').
-    const ps = reading.select("p");
-    const parts = [];
-    if (ps.length) {
-      for (const p of ps) {
-        const t = String(p?.text || "").replace(/\r/g, "").trim();
-        if (t) parts.push(t);
-      }
-    } else {
-      // Fallback: split the raw text into chunks and keep non-empty lines.
-      const raw = String(reading.text || "").replace(/\r/g, "");
-      for (const line of raw.split(/\n+/)) {
-        const t = line.trim();
-        if (t) parts.push(t);
-      }
-    }
-
-    // Filter obvious UI/ads fragments that sometimes live inside reading-content.
-    const junkSubstrings = [
-      "عضوية مميزة",
-      "تخلص من الإعلانات",
-      "استمتع بتجربة",
-      "اشترك عبر",
-      "Ko-fi",
-      "Patreon",
-      "PayPal",
-      "Visa",
-      "للمزيد من طرق الدفع",
-      "تواصل معنا",
-      "أرسل اسمك",
-      "ملاحظة",
-      "العلامات",
-      "التعليقات",
-      "روايات مقترحة",
-      "السابق",
-      "التالي",
-      "تبليغ عن مشكلة",
-      "تعليقات الفصل",
-    ];
-
-    const isJunkLine = (s) => {
-      s = String(s || "").trim();
-      if (!s) return true;
-
-      // remove "chapter picker" lines that contain many chapter tokens in one line
-      const chapCount = (s.match(/الفصل/g) || []).length;
-      if (chapCount >= 8) return true;
-
-      // UI crumbs / bullets / dots
-      if (s === "." || s === "•" || s === "·") return true;
-      if (s.length <= 2) return true;
-
-      // numbered breadcrumb like "1. الصفحة الرئيسية"
-      if (/^\d+\.\s*/.test(s) && (s.includes("الصفحة") || s.includes("الرئيسية"))) return true;
-
-      for (const sub of junkSubstrings) {
-        if (s.includes(sub)) return true;
-      }
-
-      return false;
-    };
-
-    const out = [];
-    const seen = new Set();
-    for (const t of parts) {
-      if (isJunkLine(t)) continue;
-      const key = t.replace(/\s+/g, " ");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(t);
-    }
-
-    const bodyHtml = out.length
-      ? out.map((p) => `<p>${escapeHtml(p)}</p>`).join("<br/>")
-      : "<p>(تعذر استخراج نص واضح من هذا الفصل بعد التصفية.)</p>";
-
-    // ملاحظة: بعض نسخ Mangayomi تصفّر هوامش <p>، لذلك نضيف <br/> بين الفقرات لضمان مسافة واضحة.
-    return `<div dir="rtl" style="font-size:1em; line-height:1.9; padding:0 6px;"><h2 style="margin:0 0 0.8em 0;">${escapeHtml(
-      title
-    )}</h2>${bodyHtml}</div>`;
+    return `<h2>${escapeHtml(title)}</h2>${body}`;
   }
-
 
   getFilterList() {
     return [];
