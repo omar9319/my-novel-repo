@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -174,21 +174,27 @@ class DefaultExtension extends MProvider {
       doc.selectFirst("div.entry-content") ||
       doc.selectFirst("article");
 
-    let contentText = (reading?.text || "").replace(/\r/g, "").trim();
-
-    // Fallback: some pages keep the actual text inside <p> without being reflected in .text
-    if (!contentText && reading) {
-      const ps = reading.select("p");
-      contentText = (ps || [])
-        .map((p) => (p?.text || "").replace(/\r/g, "").trim())
-        .filter(Boolean)
-        .join("\n")
-        .trim();
+    if (!reading) {
+      return `## ${title}\n\n(لم يتم العثور على محتوى الفصل في الصفحة)`;
     }
 
+    // Prefer paragraphs: usually they contain only the actual chapter text.
+    const ps = reading.select("p") || [];
+    const parts = [];
+    for (const p of ps) {
+      const t = String(p?.text || "").replace(/\r/g, "").trim();
+      if (t) parts.push(t);
+    }
+
+    let contentText = parts.join("\n\n").trim();
     if (!contentText) {
-      return `## ${title}\n\n(لا يوجد نص فصل قابل للاستخراج من هذه الصفحة)`;
+      // Fallback to full text (may include UI; we will filter lines below).
+      contentText = String(reading.text || "").replace(/\r/g, "").trim();
     }
+
+    // Remove very long "chapter picker" sequences that sometimes get merged into the text.
+    // This keeps the real chapter text even if the picker appears in the same line.
+    contentText = contentText.replace(/(?:(?:\bالفصل\s*\d+\b|\bالفصل\d+\b)\s*){8,}/g, "\n").trim();
 
     const junkSubstrings = [
       "عضوية مميزة",
@@ -202,47 +208,52 @@ class DefaultExtension extends MProvider {
       "للمزيد من طرق الدفع",
       "تواصل معنا",
       "أرسل اسمك",
-      "تم ترجمة",
+      "ملاحظة",
+      "العلامات",
+      "التعليقات",
+      "روايات مقترحة",
+      "حصريا",
       "هذا مجرد محتوى",
       "فلا تدعه يؤثر",
       "استغفر الله",
-      "العلامات",
-      "روايات مقترحة",
-      "التعليقات",
-      "تعليقات الفصل",
-      "تبليغ عن مشكلة",
+      "الصفحة الرئيسية",
       "السابق",
       "التالي",
-      "الصفحة الرئيسية",
+      "تبليغ عن مشكلة",
     ];
 
     const isJunkLine = (line) => {
       const s = String(line || "").trim();
       if (!s) return true;
-      if (s === "." || s === "•" || s === "·") return true;
-      if (/^https?:\/\//i.test(s)) return true;
-      if (/^\d+\.\s*/.test(s) && (s.includes("الصفحة") || s.includes("الرئيسية"))) return true;
 
-      // Drop very short UI crumbs
+      // remove "chapter picker" lines that contain many chapter tokens in one line
+      const chapCount = (s.match(/الفصل/g) || []).length;
+      if (chapCount >= 8) return true;
+
+      // UI crumbs / bullets / dots
+      if (s === "." || s === "•" || s === "·") return true;
       if (s.length <= 2) return true;
+
+      // numbered breadcrumb like "1. الصفحة الرئيسية"
+      if (/^\d+\.\s*/.test(s) && (s.includes("الصفحة") || s.includes("الرئيسية"))) return true;
 
       for (const sub of junkSubstrings) {
         if (s.includes(sub)) return true;
       }
+
       return false;
     };
 
-    const lines = contentText
+    const rawLines = contentText
       .split("\n")
       .map((l) => String(l || "").trim())
       .filter(Boolean);
 
     const out = [];
     const seen = new Set();
-    for (const line of lines) {
+    for (const line of rawLines) {
       if (isJunkLine(line)) continue;
 
-      // Remove duplicates that commonly appear in headers/footers
       const key = line.replace(/\s+/g, " ");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -251,14 +262,10 @@ class DefaultExtension extends MProvider {
     }
 
     const body = out.join("\n\n").trim();
-    return `
-## ${title}
-
-${body || "(تعذر تصفية النص: لا يوجد محتوى واضح بعد إزالة عناصر الصفحة.)"}
-`.trim();
+    return `## ${title}\n\n${body || "(تعذر استخراج نص واضح من هذا الفصل بعد التصفية.)"}`;
   }
 
-getFilterList() {
+  getFilterList() {
     return [];
   }
 
