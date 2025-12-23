@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -144,7 +144,12 @@ class DefaultExtension extends MProvider {
       const chName = a?.text?.trim();
       const chUrl = a?.getHref;
       if (!chName || !chUrl) continue;
-      chapters.push({ name: chName, url: chUrl, dateUpload: "", scanlator: null });
+      chapters.push({
+        name: chName,
+        url: chUrl,
+        dateUpload: String(Date.now()),
+        scanlator: "",
+      });
     }
 
     return { name, imageUrl, description, genre, author, artist, status, chapters };
