@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -66,7 +66,7 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const q = (query || "").trim();
-    const url = `${this.source.baseUrl}/?s=${encodeURIComponent(q)}&paged=${page}`;
+    const url = `${this.source.baseUrl}/?s=${encodeURIComponent(q)}&post_type=wp-manga&paged=${page}`;
     const res = await new Client().get(url, this.headers);
     return this.parseBrowse(res);
   }
@@ -162,6 +162,7 @@ class DefaultExtension extends MProvider {
 
   async cleanHtmlContent(html, fallbackTitle) {
     const doc = new Document(html);
+
     const title =
       doc.selectFirst("li.active")?.text?.trim() ||
       doc.selectFirst("h1")?.text?.trim() ||
@@ -173,17 +174,91 @@ class DefaultExtension extends MProvider {
       doc.selectFirst("div.entry-content") ||
       doc.selectFirst("article");
 
-    const content = reading?.innerHtml || "";
+    let contentText = (reading?.text || "").replace(/\r/g, "").trim();
+
+    // Fallback: some pages keep the actual text inside <p> without being reflected in .text
+    if (!contentText && reading) {
+      const ps = reading.select("p");
+      contentText = (ps || [])
+        .map((p) => (p?.text || "").replace(/\r/g, "").trim())
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+    }
+
+    if (!contentText) {
+      return `## ${title}\n\n(لا يوجد نص فصل قابل للاستخراج من هذه الصفحة)`;
+    }
+
+    const junkSubstrings = [
+      "عضوية مميزة",
+      "تخلص من الإعلانات",
+      "استمتع بتجربة",
+      "اشترك عبر",
+      "Ko-fi",
+      "Patreon",
+      "PayPal",
+      "Visa",
+      "للمزيد من طرق الدفع",
+      "تواصل معنا",
+      "أرسل اسمك",
+      "تم ترجمة",
+      "هذا مجرد محتوى",
+      "فلا تدعه يؤثر",
+      "استغفر الله",
+      "العلامات",
+      "روايات مقترحة",
+      "التعليقات",
+      "تعليقات الفصل",
+      "تبليغ عن مشكلة",
+      "السابق",
+      "التالي",
+      "الصفحة الرئيسية",
+    ];
+
+    const isJunkLine = (line) => {
+      const s = String(line || "").trim();
+      if (!s) return true;
+      if (s === "." || s === "•" || s === "·") return true;
+      if (/^https?:\/\//i.test(s)) return true;
+      if (/^\d+\.\s*/.test(s) && (s.includes("الصفحة") || s.includes("الرئيسية"))) return true;
+
+      // Drop very short UI crumbs
+      if (s.length <= 2) return true;
+
+      for (const sub of junkSubstrings) {
+        if (s.includes(sub)) return true;
+      }
+      return false;
+    };
+
+    const lines = contentText
+      .split("\n")
+      .map((l) => String(l || "").trim())
+      .filter(Boolean);
+
+    const out = [];
+    const seen = new Set();
+    for (const line of lines) {
+      if (isJunkLine(line)) continue;
+
+      // Remove duplicates that commonly appear in headers/footers
+      const key = line.replace(/\s+/g, " ");
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push(line);
+    }
+
+    const body = out.join("\n\n").trim();
     return `
 ## ${title}
 
-* * *
-
-${content}
+${body || "(تعذر تصفية النص: لا يوجد محتوى واضح بعد إزالة عناصر الصفحة.)"}
 `.trim();
   }
 
-  getFilterList() {
+getFilterList() {
     return [];
   }
 
