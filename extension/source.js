@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.16",
+  "version": "1.0.17",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -311,18 +311,41 @@ class DefaultExtension extends MProvider {
     // Extract ONLY paragraphs to avoid pulling navigation/dropdowns.
     const pEls = reading.select("p") || [];
 
-    const junkNeedles = [
-      "عضوية مميزة",
-      "Patreon",
-      "Ko-fi",
-      "PayPal",
-      "Visa",
-      "للتواصل معنا",
-      "طرق الدفع",
-      "جميع ما تم ترجمته",
-      "هذا مجرد محتوى ترفيهي",
-      "استغفر الله",
+    const HARD_STOP_PATTERNS = [
+      /Patreon/i,
+      /Ko-?fi/i,
+      /PayPal/i,
+      /Visa/i,
+      /تخل(?:ص|ّص)\s+من\s+الإعلانات/i,
+      /عضوية\s+مميزة/i,
+      /اشترك\s+عبر/i,
+      /طرق\s+الدفع/i,
+      /فضاء\s+روايات/i,
+      /cenele\.com/i,
     ];
+
+    const SOFT_REMOVE_PATTERNS = [
+      /استمتع\s+بتجربة\s+قراءة/i,
+      /ملاحظة\s*[:：]\s*أرسل\s+اسمك/i,
+      /للتواصل\s+معنا/i,
+      /جميع\s+ما\s+تم\s+ترجمته/i,
+      /هذا\s+مجرد\s+محتوى\s+ترفيهي/i,
+    ];
+
+    function _matchAny(text, patterns) {
+      for (const re of patterns) {
+        if (re.test(text)) return true;
+      }
+      return false;
+    }
+
+    function shouldHardStop(text) {
+      return _matchAny(text, HARD_STOP_PATTERNS);
+    }
+
+    function shouldRemove(text) {
+      return _matchAny(text, SOFT_REMOVE_PATTERNS);
+    }
 
     const blocks = [];
 
@@ -340,15 +363,9 @@ class DefaultExtension extends MProvider {
           continue;
         }
 
-        // Remove junk lines/paragraphs
-        let isJunk = false;
-        for (const needle of junkNeedles) {
-          if (t.includes(needle)) {
-            isJunk = true;
-            break;
-          }
-        }
-        if (isJunk) continue;
+        // Stop before site-wide membership/ads/disclaimer block (usually appended at the end).
+        if (shouldHardStop(t)) break;
+        if (shouldRemove(t)) continue;
 
         // Normalize spaces per line but keep line breaks inside the paragraph.
         const lines = t
@@ -369,14 +386,9 @@ class DefaultExtension extends MProvider {
           blocks.push("");
           continue;
         }
-        let isJunk = false;
-        for (const needle of junkNeedles) {
-          if (line.includes(needle)) {
-            isJunk = true;
-            break;
-          }
-        }
-        if (!isJunk) blocks.push(line);
+        if (shouldHardStop(line)) break;
+        if (shouldRemove(line)) continue;
+        blocks.push(line);
       }
     }
 
