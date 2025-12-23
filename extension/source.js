@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -32,24 +32,42 @@ class DefaultExtension extends MProvider {
 
   parseBrowse(res) {
     const doc = new Document(res.body);
-    const nodes = doc.select("div.page-item-detail");
+
+    // Genre pages use "div.page-item-detail" بينما صفحات البحث قد تستخدم "div.c-tabs-item__content".
+    let nodes = doc.select("div.page-item-detail");
+    if (!nodes.length) {
+      nodes = doc.select("div.c-tabs-item__content, div.page-listing-item");
+    }
+
     const list = [];
 
     for (const node of nodes) {
-      const a = node.selectFirst("div.post-title a");
-      const name = a?.text?.trim();
-      const link = a?.getHref;
-      if (!name || !link) continue;
+      const a =
+        node.selectFirst("div.post-title a") ||
+        node.selectFirst("h3 a") ||
+        node.selectFirst("h4 a") ||
+        null;
+
+      const name = a?.text?.trim() || "";
+      const link = a?.getHref || "";
+
+      // نتجاهل الروابط التي ليست لصفحات الأعمال
+      if (!name || !link || !link.includes("/cont/")) continue;
 
       const imageUrl =
         node.selectFirst("div.item-thumb img")?.getSrc ||
         node.selectFirst("div.item-thumb a img")?.getSrc ||
+        node.selectFirst("div.tab-thumb img")?.getSrc ||
+        node.selectFirst("div.tab-thumb a img")?.getSrc ||
         "";
 
       list.push({ name, imageUrl, link });
     }
 
-    const hasNextPage = doc.selectFirst("a.next.page-numbers") != null;
+    const hasNextPage =
+      doc.selectFirst("a.next.page-numbers") != null ||
+      doc.selectFirst("a.next") != null;
+
     return { list, hasNextPage };
   }
 
