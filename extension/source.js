@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.7",
+  "version": "1.0.5",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -317,10 +317,13 @@ class DefaultExtension extends MProvider {
     }
 
     const bodyHtml = out.length
-      ? out.map((p) => `<p>${escapeHtml(p)}</p>`).join("")
+      ? out.map((p) => `<p>${escapeHtml(p)}</p>`).join("<br/>")
       : "<p>(تعذر استخراج نص واضح من هذا الفصل بعد التصفية.)</p>";
 
-    return `<h2>${escapeHtml(title)}</h2>${bodyHtml}`;
+    // ملاحظة: بعض نسخ Mangayomi تصفّر هوامش <p>، لذلك نضيف <br/> بين الفقرات لضمان مسافة واضحة.
+    return `<div dir="rtl" style="font-size:1em; line-height:1.9; padding:0 6px;"><h2 style="margin:0 0 0.8em 0;">${escapeHtml(
+      title
+    )}</h2>${bodyHtml}</div>`;
   }
 
 
