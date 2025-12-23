@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -65,10 +65,50 @@ class DefaultExtension extends MProvider {
   }
 
   async search(query, page, filters) {
-    const q = (query || "").trim();
-    const url = `${this.source.baseUrl}/?s=${encodeURIComponent(q)}&post_type=wp-manga&paged=${page}`;
-    const res = await new Client().get(url, this.headers);
-    return this.parseBrowse(res);
+    const q = String(query || '').trim();
+    if (!q) return { list: [], hasNextPage: false };
+
+    const client = new Client();
+
+    // ملاحظة: كثير من مواقع WordPress/Madara تستخدم ترقيم صفحات البحث بصيغة
+    // /page/2/?s=... بدل ?paged=2. لذلك نجرب أكثر من صيغة.
+    const enc = encodeURIComponent(q);
+    const candidates = [];
+
+    if (page > 1) {
+      candidates.push(`${this.source.baseUrl}/page/${page}/?s=${enc}&post_type=wp-manga`);
+    }
+    candidates.push(`${this.source.baseUrl}/?s=${enc}&post_type=wp-manga&paged=${page}`);
+    candidates.push(`${this.source.baseUrl}/?s=${enc}&post_type=wp-manga`);
+
+    for (const url of candidates) {
+      const res = await client.get(url, this.headers);
+      const parsed = this.parseBrowse(res);
+      if (parsed?.list?.length) return parsed;
+    }
+
+    // Fallback: بعض القوالب تعتمد بحث Ajax (wp-manga-search-manga).
+    // هذا يعيد نتائج محدودة (بدون صفحات)، لكنه أفضل من لا شيء.
+    try {
+      const ajaxUrl = `${this.source.baseUrl}/wp-admin/admin-ajax.php?action=wp-manga-search-manga&title=${enc}`;
+      const res = await client.get(ajaxUrl, {
+        Referer: this.source.baseUrl + '/',
+        Origin: this.source.baseUrl,
+      });
+      const data = JSON.parse(res.body || 'null');
+      const arr = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+
+      const list = arr.map((it) => {
+        const name = (it?.title || it?.name || it?.text || '').toString().trim();
+        const link = (it?.url || it?.link || it?.permalink || '').toString().trim();
+        const imageUrl = (it?.image || it?.img || it?.thumbnail || '').toString().trim();
+        return { name, link, imageUrl };
+      }).filter((x) => x.name && x.link);
+
+      return { list, hasNextPage: false };
+    } catch (_) {
+      return { list: [], hasNextPage: false };
+    }
   }
 
   toStatus(text) {
