@@ -174,28 +174,36 @@ class DefaultExtension extends MProvider {
       doc.selectFirst("div.entry-content") ||
       doc.selectFirst("article");
 
+    const escapeHtml = (s) =>
+      String(s || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
     if (!reading) {
-      return `## ${title}\n\n(لم يتم العثور على محتوى الفصل في الصفحة)`;
+      return `<h2>${escapeHtml(title)}</h2><p>(لم يتم العثور على محتوى الفصل في الصفحة)</p>`;
     }
 
-    // Prefer paragraphs: usually they contain only the actual chapter text.
-    const ps = reading.select("p") || [];
+    // Prefer real paragraph nodes to preserve spacing (HTML renderers ignore '\n').
+    const ps = reading.select("p");
     const parts = [];
-    for (const p of ps) {
-      const t = String(p?.text || "").replace(/\r/g, "").trim();
-      if (t) parts.push(t);
+    if (ps.length) {
+      for (const p of ps) {
+        const t = String(p?.text || "").replace(/\r/g, "").trim();
+        if (t) parts.push(t);
+      }
+    } else {
+      // Fallback: split the raw text into chunks and keep non-empty lines.
+      const raw = String(reading.text || "").replace(/\r/g, "");
+      for (const line of raw.split(/\n+/)) {
+        const t = line.trim();
+        if (t) parts.push(t);
+      }
     }
 
-    let contentText = parts.join("\n\n").trim();
-    if (!contentText) {
-      // Fallback to full text (may include UI; we will filter lines below).
-      contentText = String(reading.text || "").replace(/\r/g, "").trim();
-    }
-
-    // Remove very long "chapter picker" sequences that sometimes get merged into the text.
-    // This keeps the real chapter text even if the picker appears in the same line.
-    contentText = contentText.replace(/(?:(?:\bالفصل\s*\d+\b|\bالفصل\d+\b)\s*){8,}/g, "\n").trim();
-
+    // Filter obvious UI/ads fragments that sometimes live inside reading-content.
     const junkSubstrings = [
       "عضوية مميزة",
       "تخلص من الإعلانات",
@@ -212,18 +220,14 @@ class DefaultExtension extends MProvider {
       "العلامات",
       "التعليقات",
       "روايات مقترحة",
-      "حصريا",
-      "هذا مجرد محتوى",
-      "فلا تدعه يؤثر",
-      "استغفر الله",
-      "الصفحة الرئيسية",
       "السابق",
       "التالي",
       "تبليغ عن مشكلة",
+      "تعليقات الفصل",
     ];
 
-    const isJunkLine = (line) => {
-      const s = String(line || "").trim();
+    const isJunkLine = (s) => {
+      s = String(s || "").trim();
       if (!s) return true;
 
       // remove "chapter picker" lines that contain many chapter tokens in one line
@@ -244,26 +248,23 @@ class DefaultExtension extends MProvider {
       return false;
     };
 
-    const rawLines = contentText
-      .split("\n")
-      .map((l) => String(l || "").trim())
-      .filter(Boolean);
-
     const out = [];
     const seen = new Set();
-    for (const line of rawLines) {
-      if (isJunkLine(line)) continue;
-
-      const key = line.replace(/\s+/g, " ");
+    for (const t of parts) {
+      if (isJunkLine(t)) continue;
+      const key = t.replace(/\s+/g, " ");
       if (seen.has(key)) continue;
       seen.add(key);
-
-      out.push(line);
+      out.push(t);
     }
 
-    const body = out.join("\n\n").trim();
-    return `## ${title}\n\n${body || "(تعذر استخراج نص واضح من هذا الفصل بعد التصفية.)"}`;
+    const bodyHtml = out.length
+      ? out.map((p) => `<p>${escapeHtml(p)}</p>`).join("")
+      : "<p>(تعذر استخراج نص واضح من هذا الفصل بعد التصفية.)</p>";
+
+    return `<h2>${escapeHtml(title)}</h2>${bodyHtml}`;
   }
+
 
   getFilterList() {
     return [];
