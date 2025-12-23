@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.14",
+  "version": "1.0.15",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -199,7 +199,8 @@ class DefaultExtension extends MProvider {
     const chapters = [];
     for (const el of chapterEls) {
       const a = el.selectFirst("a");
-      const chName = a?.text?.trim();
+      let chName = a?.text?.trim() || "";
+      chName = chName.replace(/^[\"'“”«»]+|[\"'“”«»]+$/g, "").trim();
       const chUrl = a?.getHref;
       if (!chName || !chUrl) continue;
       chapters.push({
