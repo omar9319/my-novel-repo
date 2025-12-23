@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://www.google.com/s2/favicons?sz=256&domain=cenele.com",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.12",
+  "version": "1.0.13",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "novel/src/ar/riwyat-novel.js",
@@ -218,128 +218,157 @@ class DefaultExtension extends MProvider {
     return this.cleanHtmlContent(res.body, name);
   }
 
-  async cleanHtmlContent(html, fallbackTitle) {
-    const doc = new Document(html);
-
-    const title =
-      doc.selectFirst("li.active")?.text?.trim() ||
-      doc.selectFirst("h1")?.text?.trim() ||
-      fallbackTitle ||
-      "";
-
-    // Prefer the actual chapter container.
-    const reading =
-      doc.selectFirst("div.reading-content") ||
-      doc.selectFirst("div.text-left") ||
-      doc.selectFirst("div.entry-content") ||
-      doc.selectFirst("article");
-
-    if (!reading) {
-      return `## ${this.escapeHtml(title)}\n\n(لا يوجد محتوى للفصل)`;
-    }
-
-    // 1) Start from HTML so we can preserve intentional blank lines,
-    //    but strip navigations/links that often inject huge chapter lists.
-    let contentHtml = reading.innerHtml || "";
-
-    // Drop scripts/styles
-    contentHtml = contentHtml
-      .replace(/<\s*script[\s\S]*?<\/\s*script\s*>/gi, "")
-      .replace(/<\s*style[\s\S]*?<\/\s*style\s*>/gi, "");
-
-    // Drop chapter selectors / navigation blocks
-    contentHtml = contentHtml
-      .replace(/<\s*select[\s\S]*?<\/\s*select\s*>/gi, "")
-      .replace(/<\s*option[\s\S]*?<\/\s*option\s*>/gi, "")
-      .replace(/<\s*nav[\s\S]*?<\/\s*nav\s*>/gi, "")
-      .replace(/<\s*form[\s\S]*?<\/\s*form\s*>/gi, "");
-
-    // Drop all anchors (prevents "Select chapter" / chapter list spam)
-    contentHtml = contentHtml.replace(/<\s*a\b[^>]*>[\s\S]*?<\/\s*a\s*>/gi, "");
-
-    // 2) Convert to plain text while preserving paragraph / line breaks.
-    let plain = contentHtml
-      .replace(/<\s*br\s*\/?\s*>/gi, "\n")
-      .replace(/<\/\s*p\s*>/gi, "\n\n")
-      .replace(/<\s*p\b[^>]*>/gi, "")
-      .replace(/<\/\s*div\s*>/gi, "\n\n")
-      .replace(/<[^>]+>/g, "");
-
-    plain = this.decodeHtmlEntities(plain).replace(/\r/g, "");
-
-    // Normalize but keep intentional empty lines (up to 4 in a row)
-    const rawLines = plain.split("\n");
-    const kept = [];
-    let emptyStreak = 0;
-
-    for (const raw of rawLines) {
-      const line = String(raw || "").replace(/\u00a0/g, " ").trim();
-
-      // Stop when we hit obvious non-chapter sections.
-      const low = line.toLowerCase();
-      if (
-        low.includes("التعليقات") ||
-        low.includes("روايات مقترحة") ||
-        low.includes("عضوية") ||
-        low.includes("patreon") ||
-        low.includes("kofi") ||
-        low.includes("جميع ما تم ترجمة") ||
-        low.includes("هذا مجرد محتوى")
-      ) {
-        break;
+    async cleanHtmlContent(html, fallbackTitle) {
+      const doc = new Document(html);
+  
+      const escapeHtml = (s) =>
+        String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+  
+      const decodeHtml = (s) =>
+        String(s || "")
+          .replace(/&nbsp;/gi, " ")
+          .replace(/&amp;/gi, "&")
+          .replace(/&lt;/gi, "<")
+          .replace(/&gt;/gi, ">")
+          .replace(/&quot;/gi, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&#039;/g, "'")
+          .replace(/&#(\d+);/g, (_, n) => {
+            try {
+              return String.fromCharCode(parseInt(n, 10));
+            } catch (_) {
+              return _;
+            }
+          });
+  
+      const title =
+        doc.selectFirst("li.active")?.text?.trim() ||
+        doc.selectFirst("div.post-title h1")?.text?.trim() ||
+        doc.selectFirst("h1")?.text?.trim() ||
+        fallbackTitle ||
+        "";
+  
+      const reading =
+        doc.selectFirst("div.reading-content") ||
+        doc.selectFirst("div.entry-content") ||
+        doc.selectFirst("article");
+  
+      if (!reading) {
+        return `<div style="white-space:pre-wrap;line-height:1.8">${escapeHtml(title)}</div>`;
       }
-
-      // Ignore pure UI noise
-      if (this.isJunkLine(line)) {
-        continue;
-      }
-
-      if (!line) {
-        emptyStreak += 1;
-        if (emptyStreak <= 4) {
-          kept.push("");
+  
+      // Remove elements that commonly pollute the chapter page (ads, nav, chapter selectors, comments, etc.)
+      const removeSelectors = [
+        "script",
+        "style",
+        "iframe",
+        "ins",
+        "form",
+        "select",
+        "option",
+        "button",
+        "nav",
+        "header",
+        "footer",
+        "aside",
+        "ul",
+        "ol",
+        "li",
+        "table",
+        ".select-chapter",
+        ".chapter-select",
+        ".wp-manga-chapter",
+        ".wp-manga-nav",
+        ".manga-navigation",
+        ".nav-links",
+        ".post-navigation",
+        ".navigation",
+        ".comments-area",
+        "#comments",
+        ".comment-respond",
+        ".comment-form",
+        ".breadcrumbs",
+        ".sharedaddy",
+        ".addtoany_share_save_container",
+        ".adsbygoogle",
+        ".code-block",
+        ".entry-meta",
+        ".tags-links",
+        ".related-posts",
+        ".related",
+        ".recommended",
+        ".suggested",
+        ".donation",
+        ".memberships",
+      ];
+  
+      for (const sel of removeSelectors) {
+        for (const el of reading.select(sel)) {
+          el.remove();
         }
-        continue;
       }
-
-      emptyStreak = 0;
-      kept.push(line);
-    }
-
-    const text = kept.join("\n").trim();
-
-    if (!text) {
-      return `## ${this.escapeHtml(title)}\n\n(لا يوجد محتوى للفصل)`;
-    }
-
-    // 3) Rebuild as safe HTML paragraphs to get clean spacing in the app.
-    const out = [];
-    const lines = text.split("\n");
-    let buffer = [];
-
-    const flush = () => {
-      if (!buffer.length) return;
-      const paragraph = buffer.join("<br/>");
-      out.push(`<p style="margin:0 0 0.9em 0; line-height:1.9">${paragraph}</p>`);
-      buffer = [];
-    };
-
-    for (const l of lines) {
-      if (!l) {
-        flush();
-        // Keep intentional blank line as an empty paragraph for spacing.
-        out.push(`<p style="margin:0 0 0.9em 0; line-height:1.9">&nbsp;</p>`);
-        continue;
+  
+      // Remove blocks by keywords (footer/ads text). This is intentionally conservative.
+      const junkHints = [
+        "عضوية مميزة",
+        "تخلص من الإعلانات",
+        "Patreon",
+        "Ko-fi",
+        "PayPal",
+        "فضاء روايات",
+        "روايات مقترحة",
+        "العلامات",
+        "التعليقات",
+        "لتفعيل العضوية",
+        "طرق الدفع",
+      ];
+  
+      for (const el of reading.select("div,section,p,blockquote")) {
+        const t = (el.text || "").trim();
+        if (!t) continue;
+        for (const hint of junkHints) {
+          if (t.includes(hint)) {
+            el.remove();
+            break;
+          }
+        }
       }
-      buffer.push(this.escapeHtml(l));
+  
+      // Preserve spacing exactly as in the HTML by translating <p>/<br> into newlines WITHOUT collapsing them.
+      let contentHtml = reading.innerHtml || "";
+      contentHtml = contentHtml.replace(/\r\n?/g, "\n");
+  
+      let text = contentHtml;
+  
+      // Line breaks / paragraphs
+      text = text.replace(/<\s*br\s*\/?\s*>/gi, "\n");
+      text = text.replace(/<\/\s*p\s*>/gi, "\n\n");
+      text = text.replace(/<\s*p[^>]*>/gi, "");
+  
+      // Other block endings -> paragraph breaks
+      text = text.replace(/<\/\s*(div|section|article|blockquote|h1|h2|h3|h4|h5|h6)\s*>/gi, "\n\n");
+      text = text.replace(/<\s*(div|section|article|blockquote|h1|h2|h3|h4|h5|h6)[^>]*>/gi, "");
+  
+      // Strip anything else
+      text = text.replace(/<[^>]+>/g, "");
+  
+      // Decode entities AFTER stripping tags
+      text = decodeHtml(text);
+  
+      // Trim line-end spaces but keep empty lines (don't collapse multiple blank lines)
+      text = text
+        .split("\n")
+        .map((l) => l.replace(/[ \t]+$/g, ""))
+        .join("\n")
+        .trim();
+  
+      // Render as pre-wrapped plain text for stable spacing in Mangayomi.
+      return `<div style="white-space:pre-wrap;line-height:1.85">${escapeHtml(title)}\n\n${escapeHtml(text)}</div>`;
     }
-    flush();
-
-    return `
-<h2 style="margin:0 0 0.8em 0">${this.escapeHtml(title)}</h2>
-${out.join("\n")}
-`.trim();
-  }
 
 
   getFilterList() {
